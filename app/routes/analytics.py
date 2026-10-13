@@ -4,7 +4,12 @@ from sqlalchemy import text
 from app.database import engine
 from app.services.anomaly_detection import detect_revenue_anomalies
 from app.services.root_cause import analyze_category_drivers
-
+from app.services.forecasting import (
+    backtest_moving_average,
+    backtest_linear_trend,
+    backtest_holt_trend,
+    forecast_future_revenue,
+)
 
 router = APIRouter(
     prefix="/api/analytics",
@@ -156,4 +161,83 @@ def get_root_cause(month: str):
     return analyze_category_drivers(
         current_categories,
         previous_categories,
+    )
+
+@router.get("/forecast/backtest")
+def get_forecast_backtest():
+    query = """
+        SELECT
+            month,
+            revenue
+        FROM monthly_revenue
+        ORDER BY month;
+    """
+
+    with engine.connect() as connection:
+        result = connection.execute(text(query))
+
+        revenue_data = [
+            {
+                "month": str(row.month),
+                "revenue": float(row.revenue),
+            }
+            for row in result
+        ]
+
+    return backtest_moving_average(
+        revenue_data,
+        window=3,
+    )
+@router.get("/forecast/backtest/linear")
+def get_linear_forecast_backtest():
+    query = text("""
+        SELECT
+            month,
+            revenue
+        FROM monthly_revenue
+        ORDER BY month;
+    """)
+
+    with engine.connect() as connection:
+        rows = connection.execute(query).mappings().all()
+
+    revenue_data = [dict(row) for row in rows]
+
+    return backtest_linear_trend(revenue_data)
+@router.get("/forecast/backtest/holt")
+def get_holt_forecast_backtest():
+    query = text("""
+        SELECT
+            month,
+            revenue
+        FROM monthly_revenue
+        ORDER BY month;
+    """)
+
+    with engine.connect() as connection:
+        rows = connection.execute(query).mappings().all()
+
+    revenue_data = [dict(row) for row in rows]
+
+    return backtest_holt_trend(revenue_data)
+@router.get("/forecast")
+def get_revenue_forecast(periods: int = 3):
+    periods = max(1, min(periods, 12))
+
+    query = text("""
+        SELECT
+            month,
+            revenue
+        FROM monthly_revenue
+        ORDER BY month;
+    """)
+
+    with engine.connect() as connection:
+        rows = connection.execute(query).mappings().all()
+
+    revenue_data = [dict(row) for row in rows]
+
+    return forecast_future_revenue(
+        revenue_data,
+        periods=periods,
     )
