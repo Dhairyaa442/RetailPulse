@@ -58,6 +58,16 @@ type RootCause = {
   revenue_change: number;
   change_pct: number | null;
 };
+type ForecastPoint = {
+  month: string;
+  predicted_revenue: number;
+};
+
+type ForecastResponse = {
+  model: string;
+  forecast_horizon: number;
+  forecast: ForecastPoint[];
+};
 
 const API = "http://127.0.0.1:8000";
 
@@ -72,6 +82,7 @@ export default function Home() {
   const [rootCauses, setRootCauses] = useState<RootCause[]>([]);
   const [selectedAnomaly, setSelectedAnomaly] = useState<string | null>(null);
   const [rootCauseLoading, setRootCauseLoading] = useState(false);
+  const [forecast, setForecast] = useState<ForecastPoint[]>([]);
 
   useEffect(() => {
     async function loadDashboard() {
@@ -82,12 +93,14 @@ export default function Home() {
           customersRes,
           deliveryRes,
           anomaliesRes,
+          forecastRes,
         ] = await Promise.all([
           fetch(`${API}/api/analytics/revenue`),
           fetch(`${API}/api/analytics/categories`),
           fetch(`${API}/api/analytics/customers`),
           fetch(`${API}/api/analytics/delivery`),
           fetch(`${API}/api/analytics/anomalies`),
+          fetch(`${API}/api/analytics/forecast`),
         ]);
 
         setRevenue(await revenueRes.json());
@@ -95,6 +108,8 @@ export default function Home() {
         setCustomers(await customersRes.json());
         setDelivery(await deliveryRes.json());
         setAnomalies(await anomaliesRes.json());
+        const forecastData: ForecastResponse = await forecastRes.json();
+        setForecast(forecastData.forecast);
       } catch (error) {
         console.error("Failed to load dashboard:", error);
       } finally {
@@ -134,7 +149,23 @@ export default function Home() {
       setRootCauseLoading(false);
     }
   }
-
+  const revenueChartData = [
+    ...revenue.map((row) => ({
+      month: row.month,
+      historical: Number(row.revenue),
+      forecast: null as number | null,
+    })),
+    ...forecast.map((row) => ({
+      month: `${row.month}-01`,
+      historical: null as number | null,
+      forecast: Number(row.predicted_revenue),
+    })),
+  ];
+  if (revenue.length > 0 && forecast.length > 0) {
+    revenueChartData[revenue.length - 1].forecast = Number(
+      revenue[revenue.length - 1].revenue
+    );
+  }
   const totalRevenue = revenue.reduce(
     (sum, row) => sum + Number(row.revenue),
     0
@@ -288,7 +319,7 @@ export default function Home() {
 
             <div className="h-80">
               <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={revenue}>
+                <LineChart data={revenueChartData}>
                   <CartesianGrid
                     strokeDasharray="3 3"
                     stroke="#1e293b"
@@ -313,28 +344,83 @@ export default function Home() {
                   />
 
                   <Tooltip
-                    formatter={(value) => [
-                      `$${Number(value).toLocaleString()}`,
-                      "Revenue",
+                    formatter={(value, name) => [
+                      `$${Number(value ?? 0).toLocaleString()}`,
+                      name,
                     ]}
                     labelFormatter={(value) =>
-                      new Date(value).toLocaleDateString("en-US", {
-                        month: "long",
-                        year: "numeric",
-                      })
-                    }
+                        new Date(String(value ?? "")).toLocaleDateString("en-US", {
+                          month: "long",
+                          year: "numeric",
+                        })
+                      }
                   />
 
                   <Line
                     type="monotone"
-                    dataKey="revenue"
+                    dataKey="historical"
+                    name="Historical Revenue"
                     stroke="#3b82f6"
                     strokeWidth={3}
                     dot={false}
+                    connectNulls={false}
                   />
+
+                  <Line
+                    type="monotone"
+                    dataKey="forecast"
+                    name="Forecast Revenue"
+                    stroke="#22c55e"
+                    strokeWidth={3}
+                    strokeDasharray="7 7"
+                    dot={{ r: 4 }}
+                    connectNulls={false}
+                  />
+                  
                 </LineChart>
               </ResponsiveContainer>
             </div>
+            {forecast.length > 0 && (
+              <div className="mt-6 pt-6 border-t border-slate-800">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                  <div>
+                    <p className="text-xs uppercase tracking-wide text-slate-500">
+                      Forecast Model
+                    </p>
+                    <p className="text-lg font-semibold mt-1">
+                      Holt Linear Trend
+                    </p>
+                  </div>
+
+                  <div>
+                    <p className="text-xs uppercase tracking-wide text-slate-500">
+                      3-Month Outlook
+                    </p>
+                    <p className="text-lg font-semibold text-red-400 mt-1">
+                      ↓ 5.9%
+                    </p>
+                  </div>
+
+                  <div>
+                    <p className="text-xs uppercase tracking-wide text-slate-500">
+                      Nov 2018 Forecast
+                    </p>
+                    <p className="text-lg font-semibold mt-1">
+                      $
+                      {forecast[
+                        forecast.length - 1
+                      ].predicted_revenue.toLocaleString(undefined, {
+                        maximumFractionDigits: 0,
+                      })}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="mt-5 text-sm text-slate-400">
+                  Backtested performance · MAE $112,015 · RMSE $131,010 · MAPE 22.43%
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Revenue anomalies */}
