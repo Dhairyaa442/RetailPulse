@@ -3,6 +3,7 @@ from sqlalchemy import text
 
 from app.database import engine
 from app.services.anomaly_detection import detect_revenue_anomalies
+from app.services.recommendations import generate_recommendations
 from app.services.root_cause import analyze_category_drivers
 from app.services.forecasting import (
     backtest_moving_average,
@@ -10,6 +11,7 @@ from app.services.forecasting import (
     backtest_holt_trend,
     forecast_future_revenue,
 )
+
 
 router = APIRouter(
     prefix="/api/analytics",
@@ -33,6 +35,8 @@ def get_monthly_revenue():
         rows = connection.execute(query).mappings().all()
 
     return [dict(row) for row in rows]
+
+
 @router.get("/categories")
 def get_category_performance():
     query = text("""
@@ -54,7 +58,7 @@ def get_category_performance():
 
 @router.get("/customers")
 def get_customer_metrics():
-    query = text("""
+    customer_query = text("""
         SELECT
             COUNT(*) AS total_customers,
             COUNT(*) FILTER (
@@ -70,7 +74,7 @@ def get_customer_metrics():
     """)
 
     with engine.connect() as connection:
-        row = connection.execute(query).mappings().one()
+        row = connection.execute(customer_query).mappings().one()
 
     return dict(row)
 
@@ -93,6 +97,7 @@ def get_delivery_performance():
 
     return [dict(row) for row in rows]
 
+
 @router.get("/anomalies")
 def get_revenue_anomalies():
     query = text("""
@@ -110,11 +115,15 @@ def get_revenue_anomalies():
 
     return detect_revenue_anomalies(revenue_data)
 
+
 @router.get("/root-cause")
 def get_root_cause(month: str):
     query = text("""
         SELECT
-            COALESCE(pct.product_category_name_english, p.product_category_name) AS category,
+            COALESCE(
+                pct.product_category_name_english,
+                p.product_category_name
+            ) AS category,
             SUM(oi.price)::numeric AS revenue
         FROM orders o
         JOIN order_items oi
@@ -155,39 +164,41 @@ def get_root_cause(month: str):
             {"month": previous_month},
         ).mappings().all()
 
-    current_categories = [dict(row) for row in current_rows]
-    previous_categories = [dict(row) for row in previous_rows]
+    current_categories = [
+        dict(row) for row in current_rows
+    ]
+
+    previous_categories = [
+        dict(row) for row in previous_rows
+    ]
 
     return analyze_category_drivers(
         current_categories,
         previous_categories,
     )
 
+
 @router.get("/forecast/backtest")
 def get_forecast_backtest():
-    query = """
+    query = text("""
         SELECT
             month,
             revenue
         FROM monthly_revenue
         ORDER BY month;
-    """
+    """)
 
     with engine.connect() as connection:
-        result = connection.execute(text(query))
+        rows = connection.execute(query).mappings().all()
 
-        revenue_data = [
-            {
-                "month": str(row.month),
-                "revenue": float(row.revenue),
-            }
-            for row in result
-        ]
+    revenue_data = [dict(row) for row in rows]
 
     return backtest_moving_average(
         revenue_data,
         window=3,
     )
+
+
 @router.get("/forecast/backtest/linear")
 def get_linear_forecast_backtest():
     query = text("""
@@ -204,6 +215,8 @@ def get_linear_forecast_backtest():
     revenue_data = [dict(row) for row in rows]
 
     return backtest_linear_trend(revenue_data)
+
+
 @router.get("/forecast/backtest/holt")
 def get_holt_forecast_backtest():
     query = text("""
@@ -220,6 +233,8 @@ def get_holt_forecast_backtest():
     revenue_data = [dict(row) for row in rows]
 
     return backtest_holt_trend(revenue_data)
+
+
 @router.get("/forecast")
 def get_revenue_forecast(periods: int = 3):
     periods = max(1, min(periods, 12))
@@ -240,4 +255,78 @@ def get_revenue_forecast(periods: int = 3):
     return forecast_future_revenue(
         revenue_data,
         periods=periods,
+    )
+
+
+@router.get("/recommendations")
+def get_recommendations():
+    customer_query = text("""
+        SELECT
+            COUNT(*) AS total_customers,
+            COUNT(*) FILTER (
+                WHERE repeat_customer = TRUE
+            ) AS repeat_customers,
+            ROUND(
+                100.0 * COUNT(*) FILTER (
+                    WHERE repeat_customer = TRUE
+                ) / NULLIF(COUNT(*), 0),
+                2
+            ) AS repeat_customer_rate
+        FROM customer_metrics;
+    """)
+
+    delivery_query = text("""
+        SELECT
+            delivery_status,
+            COUNT(DISTINCT order_id) AS total_orders,
+            ROUND(AVG(review_score)::numeric, 2) AS average_review_score,
+            ROUND(AVG(days_vs_estimate)::numeric, 2) AS average_days_vs_estimate
+        FROM delivery_performance
+        GROUP BY delivery_status
+        ORDER BY delivery_status;
+    """)
+
+    revenue_query = text("""
+        SELECT
+            month,
+            revenue
+        FROM monthly_revenue
+        ORDER BY month;
+    """)
+
+    with engine.connect() as connection:
+        customer_row = connection.execute(
+            customer_query
+        ).mappings().one()
+
+        delivery_rows = connection.execute(
+            delivery_query
+        ).mappings().all()
+
+        revenue_rows = connection.execute(
+            revenue_query
+        ).mappings().all()
+
+    customer_metrics = dict(customer_row)
+
+    delivery_metrics = [
+        dict(row) for row in delivery_rows
+    ]
+
+    revenue_data = [
+        dict(row) for row in revenue_rows
+    ]
+
+    anomalies = detect_revenue_anomalies(revenue_data)
+
+    forecast = forecast_future_revenue(
+        revenue_data,
+        periods=3,
+    )
+
+    return generate_recommendations(
+        customer_metrics=customer_metrics,
+        delivery_metrics=delivery_metrics,
+        anomalies=anomalies,
+        forecast=forecast,
     )

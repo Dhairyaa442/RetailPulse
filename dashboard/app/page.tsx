@@ -11,6 +11,7 @@ import {
   XAxis,
   YAxis,
   Tooltip,
+  Legend,
 } from "recharts";
 
 type Revenue = {
@@ -58,15 +59,30 @@ type RootCause = {
   revenue_change: number;
   change_pct: number | null;
 };
+
 type ForecastPoint = {
   month: string;
-  predicted_revenue: number;
+  historical: number | null;
+  forecast: number | null;
 };
 
-type ForecastResponse = {
-  model: string;
-  forecast_horizon: number;
-  forecast: ForecastPoint[];
+type Forecast = {
+  model?: string;
+  forecast?: ForecastPoint[];
+  metrics?: {
+    mae?: number;
+    rmse?: number;
+    mape?: number;
+  };
+};
+
+type Recommendation = {
+  id: string;
+  priority: "critical" | "high" | "medium" | "low";
+  category: string;
+  title: string;
+  insight: string;
+  recommendation: string;
 };
 
 const API = "http://127.0.0.1:8000";
@@ -77,12 +93,15 @@ export default function Home() {
   const [customers, setCustomers] = useState<CustomerMetrics | null>(null);
   const [delivery, setDelivery] = useState<Delivery[]>([]);
   const [anomalies, setAnomalies] = useState<Anomaly[]>([]);
+  const [forecast, setForecast] = useState<ForecastPoint[]>([]);
+  const [forecastMetrics, setForecastMetrics] =
+    useState<Forecast["metrics"]>(undefined);
+  const [recommendations, setRecommendations] = useState<Recommendation[]>([]);
   const [loading, setLoading] = useState(true);
 
   const [rootCauses, setRootCauses] = useState<RootCause[]>([]);
   const [selectedAnomaly, setSelectedAnomaly] = useState<string | null>(null);
   const [rootCauseLoading, setRootCauseLoading] = useState(false);
-  const [forecast, setForecast] = useState<ForecastPoint[]>([]);
 
   useEffect(() => {
     async function loadDashboard() {
@@ -94,22 +113,42 @@ export default function Home() {
           deliveryRes,
           anomaliesRes,
           forecastRes,
+          recommendationsRes,
         ] = await Promise.all([
           fetch(`${API}/api/analytics/revenue`),
           fetch(`${API}/api/analytics/categories`),
           fetch(`${API}/api/analytics/customers`),
           fetch(`${API}/api/analytics/delivery`),
           fetch(`${API}/api/analytics/anomalies`),
-          fetch(`${API}/api/analytics/forecast`),
+          fetch(`${API}/api/analytics/forecast?periods=3`),
+          fetch(`${API}/api/analytics/recommendations`),
         ]);
+
+        if (
+          !revenueRes.ok ||
+          !categoriesRes.ok ||
+          !customersRes.ok ||
+          !deliveryRes.ok ||
+          !anomaliesRes.ok
+        ) {
+          throw new Error("Failed to load core dashboard data");
+        }
 
         setRevenue(await revenueRes.json());
         setCategories(await categoriesRes.json());
         setCustomers(await customersRes.json());
         setDelivery(await deliveryRes.json());
         setAnomalies(await anomaliesRes.json());
-        const forecastData: ForecastResponse = await forecastRes.json();
-        setForecast(forecastData.forecast);
+
+        if (forecastRes.ok) {
+          const forecastData: Forecast = await forecastRes.json();
+          setForecast(forecastData.forecast ?? []);
+          setForecastMetrics(forecastData.metrics);
+        }
+
+        if (recommendationsRes.ok) {
+          setRecommendations(await recommendationsRes.json());
+        }
       } catch (error) {
         console.error("Failed to load dashboard:", error);
       } finally {
@@ -140,7 +179,7 @@ export default function Home() {
         throw new Error("Failed to load root-cause analysis");
       }
 
-      const data = await response.json();
+      const data: RootCause[] = await response.json();
       setRootCauses(data);
     } catch (error) {
       console.error("Failed to investigate anomaly:", error);
@@ -149,23 +188,7 @@ export default function Home() {
       setRootCauseLoading(false);
     }
   }
-  const revenueChartData = [
-    ...revenue.map((row) => ({
-      month: row.month,
-      historical: Number(row.revenue),
-      forecast: null as number | null,
-    })),
-    ...forecast.map((row) => ({
-      month: `${row.month}-01`,
-      historical: null as number | null,
-      forecast: Number(row.predicted_revenue),
-    })),
-  ];
-  if (revenue.length > 0 && forecast.length > 0) {
-    revenueChartData[revenue.length - 1].forecast = Number(
-      revenue[revenue.length - 1].revenue
-    );
-  }
+
   const totalRevenue = revenue.reduce(
     (sum, row) => sum + Number(row.revenue),
     0
@@ -199,14 +222,16 @@ export default function Home() {
             RETAIL INTELLIGENCE
           </p>
 
-          <h1 className="text-4xl font-bold">RetailPulse</h1>
+          <h1 className="text-4xl font-bold">
+            RetailPulse
+          </h1>
 
           <p className="text-slate-400 mt-2">
             E-commerce analytics and decision intelligence dashboard
           </p>
         </div>
 
-        {/* KPI cards */}
+        {/* KPI Cards */}
         <section className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5 mb-10">
           <MetricCard
             title="Total Revenue"
@@ -231,7 +256,7 @@ export default function Home() {
           />
         </section>
 
-        {/* Category and business insight cards */}
+        {/* Categories + Business Insights */}
         <section className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-10">
           <div className="bg-slate-900 border border-slate-800 rounded-xl p-6">
             <h2 className="text-xl font-semibold mb-5">
@@ -245,7 +270,7 @@ export default function Home() {
                   className="flex justify-between border-b border-slate-800 pb-3"
                 >
                   <div>
-                    <p className="font-medium">
+                    <p className="font-medium capitalize">
                       {category.category.replaceAll("_", " ")}
                     </p>
 
@@ -309,7 +334,6 @@ export default function Home() {
           </div>
         </section>
 
-        {/* Analytics */}
         <section className="space-y-6">
           {/* Revenue Trend */}
           <div className="bg-slate-900 border border-slate-800 rounded-xl p-6">
@@ -319,7 +343,7 @@ export default function Home() {
 
             <div className="h-80">
               <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={revenueChartData}>
+                <LineChart data={revenue}>
                   <CartesianGrid
                     strokeDasharray="3 3"
                     stroke="#1e293b"
@@ -329,7 +353,7 @@ export default function Home() {
                     dataKey="month"
                     stroke="#94a3b8"
                     tickFormatter={(value) =>
-                      new Date(value).toLocaleDateString("en-US", {
+                      new Date(String(value)).toLocaleDateString("en-US", {
                         month: "short",
                         year: "2-digit",
                       })
@@ -339,91 +363,220 @@ export default function Home() {
                   <YAxis
                     stroke="#94a3b8"
                     tickFormatter={(value) =>
-                      `$${(value / 1000000).toFixed(1)}M`
+                      `$${(Number(value) / 1000000).toFixed(1)}M`
                     }
                   />
 
                   <Tooltip
-                    formatter={(value, name) => [
+                    formatter={(value) => [
                       `$${Number(value ?? 0).toLocaleString()}`,
-                      name,
+                      "Revenue",
                     ]}
                     labelFormatter={(value) =>
-                        new Date(String(value ?? "")).toLocaleDateString("en-US", {
+                      new Date(String(value ?? "")).toLocaleDateString(
+                        "en-US",
+                        {
                           month: "long",
                           year: "numeric",
-                        })
-                      }
+                        }
+                      )
+                    }
                   />
 
                   <Line
                     type="monotone"
-                    dataKey="historical"
-                    name="Historical Revenue"
+                    dataKey="revenue"
                     stroke="#3b82f6"
                     strokeWidth={3}
                     dot={false}
-                    connectNulls={false}
                   />
-
-                  <Line
-                    type="monotone"
-                    dataKey="forecast"
-                    name="Forecast Revenue"
-                    stroke="#22c55e"
-                    strokeWidth={3}
-                    strokeDasharray="7 7"
-                    dot={{ r: 4 }}
-                    connectNulls={false}
-                  />
-                  
                 </LineChart>
               </ResponsiveContainer>
             </div>
-            {forecast.length > 0 && (
-              <div className="mt-6 pt-6 border-t border-slate-800">
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                  <div>
-                    <p className="text-xs uppercase tracking-wide text-slate-500">
-                      Forecast Model
-                    </p>
-                    <p className="text-lg font-semibold mt-1">
-                      Holt Linear Trend
-                    </p>
-                  </div>
+          </div>
 
-                  <div>
-                    <p className="text-xs uppercase tracking-wide text-slate-500">
-                      3-Month Outlook
-                    </p>
-                    <p className="text-lg font-semibold text-red-400 mt-1">
-                      ↓ 5.9%
-                    </p>
-                  </div>
+          {/* Revenue Forecast */}
+          <div className="bg-slate-900 border border-slate-800 rounded-xl p-6">
+            <div className="flex items-start justify-between gap-4 mb-6">
+              <div>
+                <h2 className="text-xl font-semibold">
+                  Revenue Forecast
+                </h2>
 
-                  <div>
-                    <p className="text-xs uppercase tracking-wide text-slate-500">
-                      Nov 2018 Forecast
-                    </p>
-                    <p className="text-lg font-semibold mt-1">
-                      $
-                      {forecast[
-                        forecast.length - 1
-                      ].predicted_revenue.toLocaleString(undefined, {
+                <p className="text-sm text-slate-400 mt-1">
+                  3-month revenue projection based on Holt trend forecasting
+                </p>
+              </div>
+
+              <span className="text-xs font-semibold px-3 py-1 rounded-full bg-blue-500/10 text-blue-400">
+                Holt Trend
+              </span>
+            </div>
+
+            {forecast.length === 0 ? (
+              <p className="text-slate-400">
+                Forecast data unavailable.
+              </p>
+            ) : (
+              <>
+                <div className="h-80">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={forecast}>
+                      <CartesianGrid
+                        strokeDasharray="3 3"
+                        stroke="#1e293b"
+                      />
+
+                      <XAxis
+                        dataKey="month"
+                        stroke="#94a3b8"
+                        tickFormatter={(value) =>
+                          new Date(String(value)).toLocaleDateString(
+                            "en-US",
+                            {
+                              month: "short",
+                              year: "2-digit",
+                            }
+                          )
+                        }
+                      />
+
+                      <YAxis
+                        stroke="#94a3b8"
+                        tickFormatter={(value) =>
+                          `$${(Number(value) / 1000000).toFixed(1)}M`
+                        }
+                      />
+
+                      <Tooltip
+                        formatter={(value, name) => [
+                          `$${Number(value ?? 0).toLocaleString()}`,
+                          String(name),
+                        ]}
+                        labelFormatter={(value) =>
+                          new Date(String(value ?? "")).toLocaleDateString(
+                            "en-US",
+                            {
+                              month: "long",
+                              year: "numeric",
+                            }
+                          )
+                        }
+                      />
+
+                      <Legend />
+                      <Line
+                        type="monotone"
+                        dataKey="predicted_revenue"
+                        name="Forecast Revenue"
+                        stroke="#a855f7"
+                        strokeWidth={3}
+                        strokeDasharray="6 6"
+                        dot={{ r: 4 }}
+                      />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+
+                {forecastMetrics && (
+                  <div className="mt-5 text-sm text-slate-400">
+                    Backtested performance
+                    {forecastMetrics.mae !== undefined &&
+                      ` · MAE $${Number(
+                        forecastMetrics.mae
+                      ).toLocaleString(undefined, {
                         maximumFractionDigits: 0,
-                      })}
-                    </p>
+                      })}`}
+                    {forecastMetrics.rmse !== undefined &&
+                      ` · RMSE $${Number(
+                        forecastMetrics.rmse
+                      ).toLocaleString(undefined, {
+                        maximumFractionDigits: 0,
+                      })}`}
+                    {forecastMetrics.mape !== undefined &&
+                      ` · MAPE ${Number(
+                        forecastMetrics.mape
+                      ).toFixed(2)}%`}
                   </div>
-                </div>
+                )}
+              </>
+            )}
+          </div>
 
-                <div className="mt-5 text-sm text-slate-400">
-                  Backtested performance · MAE $112,015 · RMSE $131,010 · MAPE 22.43%
-                </div>
+          {/* Business Recommendations */}
+          <div className="bg-slate-900 border border-slate-800 rounded-xl p-6">
+            <div className="flex items-center justify-between mb-6">
+              <div>
+                <h2 className="text-xl font-semibold">
+                  Business Recommendations
+                </h2>
+
+                <p className="text-sm text-slate-400 mt-1">
+                  Data-driven actions based on customer, delivery, revenue,
+                  and forecast signals
+                </p>
+              </div>
+
+              <span className="text-sm text-slate-400">
+                {recommendations.length} insights
+              </span>
+            </div>
+
+            {recommendations.length === 0 ? (
+              <p className="text-slate-400">
+                No recommendations available.
+              </p>
+            ) : (
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                {recommendations.map((item) => (
+                  <div
+                    key={item.id}
+                    className="border border-slate-800 rounded-lg p-5 bg-slate-950/30"
+                  >
+                    <div className="flex items-center justify-between gap-3 mb-3">
+                      <span className="text-xs text-slate-400 uppercase tracking-wide">
+                        {item.category}
+                      </span>
+
+                      <span
+                        className={`text-xs font-semibold px-2 py-1 rounded ${
+                          item.priority === "critical"
+                            ? "bg-red-500/15 text-red-400"
+                            : item.priority === "high"
+                            ? "bg-orange-500/15 text-orange-400"
+                            : item.priority === "medium"
+                            ? "bg-yellow-500/15 text-yellow-400"
+                            : "bg-blue-500/15 text-blue-400"
+                        }`}
+                      >
+                        {item.priority.toUpperCase()}
+                      </span>
+                    </div>
+
+                    <h3 className="font-semibold text-lg mb-2">
+                      {item.title}
+                    </h3>
+
+                    <p className="text-sm text-slate-400 mb-4">
+                      {item.insight}
+                    </p>
+
+                    <div className="border-t border-slate-800 pt-3">
+                      <p className="text-xs text-blue-400 font-semibold uppercase tracking-wide mb-1">
+                        Recommended Action
+                      </p>
+
+                      <p className="text-sm text-slate-300">
+                        {item.recommendation}
+                      </p>
+                    </div>
+                  </div>
+                ))}
               </div>
             )}
           </div>
 
-          {/* Revenue anomalies */}
+          {/* Revenue Anomalies */}
           <div className="bg-slate-900 border border-slate-800 rounded-xl p-6">
             <div className="flex items-center justify-between mb-6">
               <div>
@@ -432,7 +585,8 @@ export default function Home() {
                 </h2>
 
                 <p className="text-sm text-slate-400 mt-1">
-                  Unusual revenue movements detected against the rolling baseline
+                  Unusual revenue movements detected against the rolling
+                  baseline
                 </p>
               </div>
 
@@ -453,7 +607,6 @@ export default function Home() {
                     className="border border-slate-800 rounded-lg p-4"
                   >
                     <div className="flex items-start justify-between gap-6">
-                      {/* Anomaly information */}
                       <div className="flex items-center gap-3">
                         <p className="font-semibold">
                           {new Date(
@@ -477,12 +630,14 @@ export default function Home() {
                         </span>
                       </div>
 
-                      {/* Anomaly metrics */}
                       <div className="text-right">
                         <p className="text-sm text-slate-400">
                           Expected $
-                          {anomaly.expected_revenue.toLocaleString()} · Actual $
-                          {anomaly.revenue.toLocaleString()}
+                          {Number(
+                            anomaly.expected_revenue
+                          ).toLocaleString()}{" "}
+                          · Actual $
+                          {Number(anomaly.revenue).toLocaleString()}
                         </p>
 
                         <p
@@ -493,11 +648,11 @@ export default function Home() {
                           }`}
                         >
                           {anomaly.direction === "increase" ? "+" : ""}
-                          {anomaly.deviation_pct.toFixed(1)}%
+                          {Number(anomaly.deviation_pct).toFixed(1)}%
                         </p>
 
                         <p className="text-xs text-slate-500 mt-1">
-                          z-score {anomaly.z_score.toFixed(2)}
+                          z-score {Number(anomaly.z_score).toFixed(2)}
                         </p>
 
                         <button
@@ -514,7 +669,6 @@ export default function Home() {
                       </div>
                     </div>
 
-                    {/* Root Cause Analysis */}
                     {selectedAnomaly === anomaly.month && (
                       <div className="mt-4 pt-4 border-t border-slate-800">
                         <p className="text-sm font-semibold mb-3">
@@ -539,7 +693,7 @@ export default function Home() {
                                   key={cause.category}
                                   className="flex items-center justify-between bg-slate-950/40 rounded-md px-3 py-2"
                                 >
-                                  <span className="text-sm text-slate-300">
+                                  <span className="text-sm text-slate-300 capitalize">
                                     {cause.category.replaceAll("_", " ")}
                                   </span>
 
@@ -554,9 +708,9 @@ export default function Home() {
                                   >
                                     {change === null
                                       ? "New"
-                                      : `${change >= 0 ? "+" : ""}${change.toFixed(
-                                          1
-                                        )}%`}
+                                      : `${
+                                          change >= 0 ? "+" : ""
+                                        }${change.toFixed(1)}%`}
                                   </span>
                                 </div>
                               );
@@ -601,7 +755,7 @@ export default function Home() {
 
                   <Tooltip
                     formatter={(value) => [
-                      `${Number(value).toFixed(2)}/5`,
+                      `${Number(value ?? 0).toFixed(2)}/5`,
                       "Average Review Score",
                     ]}
                   />
@@ -616,7 +770,7 @@ export default function Home() {
             </div>
           </div>
 
-          {/* Recent Monthly Performance */}
+          {/* Monthly Performance */}
           <div className="bg-slate-900 border border-slate-800 rounded-xl p-6">
             <h2 className="text-xl font-semibold mb-5">
               Recent Monthly Performance
@@ -626,10 +780,18 @@ export default function Home() {
               <table className="w-full text-left">
                 <thead className="text-slate-400 border-b border-slate-700">
                   <tr>
-                    <th className="pb-3">Month</th>
-                    <th className="pb-3">Orders</th>
-                    <th className="pb-3">Revenue</th>
-                    <th className="pb-3">MoM Growth</th>
+                    <th className="pb-3">
+                      Month
+                    </th>
+                    <th className="pb-3">
+                      Orders
+                    </th>
+                    <th className="pb-3">
+                      Revenue
+                    </th>
+                    <th className="pb-3">
+                      MoM Growth
+                    </th>
                   </tr>
                 </thead>
 
@@ -673,7 +835,9 @@ export default function Home() {
                           {row.mom_growth_percent === null
                             ? "—"
                             : `${
-                                row.mom_growth_percent >= 0 ? "+" : ""
+                                row.mom_growth_percent >= 0
+                                  ? "+"
+                                  : ""
                               }${row.mom_growth_percent}%`}
                         </td>
                       </tr>
