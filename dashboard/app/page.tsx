@@ -41,6 +41,24 @@ type Delivery = {
   average_days_vs_estimate: number;
 };
 
+type Anomaly = {
+  month: string;
+  revenue: number;
+  expected_revenue: number;
+  deviation_pct: number;
+  z_score: number;
+  direction: "increase" | "decrease";
+  severity: "medium" | "high" | "critical";
+};
+
+type RootCause = {
+  category: string;
+  current_revenue: number;
+  previous_revenue: number;
+  revenue_change: number;
+  change_pct: number | null;
+};
+
 const API = "http://127.0.0.1:8000";
 
 export default function Home() {
@@ -48,23 +66,35 @@ export default function Home() {
   const [categories, setCategories] = useState<Category[]>([]);
   const [customers, setCustomers] = useState<CustomerMetrics | null>(null);
   const [delivery, setDelivery] = useState<Delivery[]>([]);
+  const [anomalies, setAnomalies] = useState<Anomaly[]>([]);
   const [loading, setLoading] = useState(true);
+
+  const [rootCauses, setRootCauses] = useState<RootCause[]>([]);
+  const [selectedAnomaly, setSelectedAnomaly] = useState<string | null>(null);
+  const [rootCauseLoading, setRootCauseLoading] = useState(false);
 
   useEffect(() => {
     async function loadDashboard() {
       try {
-        const [revenueRes, categoriesRes, customersRes, deliveryRes] =
-          await Promise.all([
-            fetch(`${API}/api/analytics/revenue`),
-            fetch(`${API}/api/analytics/categories`),
-            fetch(`${API}/api/analytics/customers`),
-            fetch(`${API}/api/analytics/delivery`),
-          ]);
+        const [
+          revenueRes,
+          categoriesRes,
+          customersRes,
+          deliveryRes,
+          anomaliesRes,
+        ] = await Promise.all([
+          fetch(`${API}/api/analytics/revenue`),
+          fetch(`${API}/api/analytics/categories`),
+          fetch(`${API}/api/analytics/customers`),
+          fetch(`${API}/api/analytics/delivery`),
+          fetch(`${API}/api/analytics/anomalies`),
+        ]);
 
         setRevenue(await revenueRes.json());
         setCategories(await categoriesRes.json());
         setCustomers(await customersRes.json());
         setDelivery(await deliveryRes.json());
+        setAnomalies(await anomaliesRes.json());
       } catch (error) {
         console.error("Failed to load dashboard:", error);
       } finally {
@@ -74,6 +104,36 @@ export default function Home() {
 
     loadDashboard();
   }, []);
+
+  async function investigateAnomaly(month: string) {
+    if (selectedAnomaly === month) {
+      setSelectedAnomaly(null);
+      setRootCauses([]);
+      return;
+    }
+
+    try {
+      setSelectedAnomaly(month);
+      setRootCauses([]);
+      setRootCauseLoading(true);
+
+      const response = await fetch(
+        `${API}/api/analytics/root-cause?month=${month}`
+      );
+
+      if (!response.ok) {
+        throw new Error("Failed to load root-cause analysis");
+      }
+
+      const data = await response.json();
+      setRootCauses(data);
+    } catch (error) {
+      console.error("Failed to investigate anomaly:", error);
+      setRootCauses([]);
+    } finally {
+      setRootCauseLoading(false);
+    }
+  }
 
   const totalRevenue = revenue.reduce(
     (sum, row) => sum + Number(row.revenue),
@@ -102,23 +162,21 @@ export default function Home() {
   return (
     <main className="min-h-screen bg-slate-950 text-white">
       <div className="max-w-7xl mx-auto px-8 py-10">
-
+        {/* Header */}
         <div className="mb-10">
           <p className="text-blue-400 font-semibold mb-2">
             RETAIL INTELLIGENCE
           </p>
 
-          <h1 className="text-4xl font-bold">
-            RetailPulse
-          </h1>
+          <h1 className="text-4xl font-bold">RetailPulse</h1>
 
           <p className="text-slate-400 mt-2">
             E-commerce analytics and decision intelligence dashboard
           </p>
         </div>
 
+        {/* KPI cards */}
         <section className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5 mb-10">
-
           <MetricCard
             title="Total Revenue"
             value={`$${totalRevenue.toLocaleString(undefined, {
@@ -140,11 +198,10 @@ export default function Home() {
             title="Repeat Customer Rate"
             value={`${customers?.repeat_customer_rate ?? 0}%`}
           />
-
         </section>
 
+        {/* Category and business insight cards */}
         <section className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-10">
-
           <div className="bg-slate-900 border border-slate-800 rounded-xl p-6">
             <h2 className="text-xl font-semibold mb-5">
               Top Product Categories
@@ -167,7 +224,11 @@ export default function Home() {
                   </div>
 
                   <p className="font-semibold">
-                    ${Number(category.revenue).toLocaleString()}
+                    $
+                    {Number(category.revenue).toLocaleString(undefined, {
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 2,
+                    })}
                   </p>
                 </div>
               ))}
@@ -180,7 +241,6 @@ export default function Home() {
             </h2>
 
             <div className="space-y-5">
-
               <Insight
                 title="Top Revenue Category"
                 value={
@@ -214,20 +274,25 @@ export default function Home() {
                   customers?.repeat_customers.toLocaleString() ?? "—"
                 }
               />
-
             </div>
           </div>
-
         </section>
 
-        <section className="bg-slate-900 border border-slate-800 rounded-xl p-6">
-        <div className="bg-slate-900 border border-slate-800 rounded-xl p-6">
-            <h2 className="text-xl font-semibold mb-6">Revenue Trend</h2>
+        {/* Analytics */}
+        <section className="space-y-6">
+          {/* Revenue Trend */}
+          <div className="bg-slate-900 border border-slate-800 rounded-xl p-6">
+            <h2 className="text-xl font-semibold mb-6">
+              Revenue Trend
+            </h2>
 
             <div className="h-80">
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={revenue}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
+                  <CartesianGrid
+                    strokeDasharray="3 3"
+                    stroke="#1e293b"
+                  />
 
                   <XAxis
                     dataKey="month"
@@ -242,7 +307,9 @@ export default function Home() {
 
                   <YAxis
                     stroke="#94a3b8"
-                    tickFormatter={(value) => `$${(value / 1000000).toFixed(1)}M`}
+                    tickFormatter={(value) =>
+                      `$${(value / 1000000).toFixed(1)}M`
+                    }
                   />
 
                   <Tooltip
@@ -269,6 +336,156 @@ export default function Home() {
               </ResponsiveContainer>
             </div>
           </div>
+
+          {/* Revenue anomalies */}
+          <div className="bg-slate-900 border border-slate-800 rounded-xl p-6">
+            <div className="flex items-center justify-between mb-6">
+              <div>
+                <h2 className="text-xl font-semibold">
+                  Revenue Anomaly Alerts
+                </h2>
+
+                <p className="text-sm text-slate-400 mt-1">
+                  Unusual revenue movements detected against the rolling baseline
+                </p>
+              </div>
+
+              <span className="text-sm text-slate-400">
+                {anomalies.length} detected
+              </span>
+            </div>
+
+            {anomalies.length === 0 ? (
+              <p className="text-slate-400">
+                No revenue anomalies detected.
+              </p>
+            ) : (
+              <div className="space-y-3">
+                {anomalies.map((anomaly) => (
+                  <div
+                    key={anomaly.month}
+                    className="border border-slate-800 rounded-lg p-4"
+                  >
+                    <div className="flex items-start justify-between gap-6">
+                      {/* Anomaly information */}
+                      <div className="flex items-center gap-3">
+                        <p className="font-semibold">
+                          {new Date(
+                            `${anomaly.month}-01`
+                          ).toLocaleDateString("en-US", {
+                            month: "long",
+                            year: "numeric",
+                          })}
+                        </p>
+
+                        <span
+                          className={`text-xs font-semibold px-2 py-1 rounded ${
+                            anomaly.severity === "critical"
+                              ? "bg-red-500/15 text-red-400"
+                              : anomaly.severity === "high"
+                              ? "bg-orange-500/15 text-orange-400"
+                              : "bg-yellow-500/15 text-yellow-400"
+                          }`}
+                        >
+                          {anomaly.severity.toUpperCase()}
+                        </span>
+                      </div>
+
+                      {/* Anomaly metrics */}
+                      <div className="text-right">
+                        <p className="text-sm text-slate-400">
+                          Expected $
+                          {anomaly.expected_revenue.toLocaleString()} · Actual $
+                          {anomaly.revenue.toLocaleString()}
+                        </p>
+
+                        <p
+                          className={`font-semibold ${
+                            anomaly.direction === "increase"
+                              ? "text-green-400"
+                              : "text-red-400"
+                          }`}
+                        >
+                          {anomaly.direction === "increase" ? "+" : ""}
+                          {anomaly.deviation_pct.toFixed(1)}%
+                        </p>
+
+                        <p className="text-xs text-slate-500 mt-1">
+                          z-score {anomaly.z_score.toFixed(2)}
+                        </p>
+
+                        <button
+                          type="button"
+                          onClick={() =>
+                            investigateAnomaly(anomaly.month)
+                          }
+                          className="mt-2 text-xs font-semibold text-blue-400 hover:text-blue-300"
+                        >
+                          {selectedAnomaly === anomaly.month
+                            ? "Hide Analysis"
+                            : "Investigate →"}
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Root Cause Analysis */}
+                    {selectedAnomaly === anomaly.month && (
+                      <div className="mt-4 pt-4 border-t border-slate-800">
+                        <p className="text-sm font-semibold mb-3">
+                          Root Cause Analysis
+                        </p>
+
+                        {rootCauseLoading ? (
+                          <p className="text-sm text-slate-400">
+                            Analyzing category drivers...
+                          </p>
+                        ) : rootCauses.length === 0 ? (
+                          <p className="text-sm text-slate-400">
+                            No category drivers found.
+                          </p>
+                        ) : (
+                          <div className="space-y-2">
+                            {rootCauses.slice(0, 5).map((cause) => {
+                              const change = cause.change_pct;
+
+                              return (
+                                <div
+                                  key={cause.category}
+                                  className="flex items-center justify-between bg-slate-950/40 rounded-md px-3 py-2"
+                                >
+                                  <span className="text-sm text-slate-300">
+                                    {cause.category.replaceAll("_", " ")}
+                                  </span>
+
+                                  <span
+                                    className={`text-sm font-semibold ${
+                                      change === null
+                                        ? "text-slate-400"
+                                        : change >= 0
+                                        ? "text-green-400"
+                                        : "text-red-400"
+                                    }`}
+                                  >
+                                    {change === null
+                                      ? "New"
+                                      : `${change >= 0 ? "+" : ""}${change.toFixed(
+                                          1
+                                        )}%`}
+                                  </span>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Delivery Performance */}
           <div className="bg-slate-900 border border-slate-800 rounded-xl p-6">
             <h2 className="text-xl font-semibold mb-2">
               Delivery Performance
@@ -281,7 +498,10 @@ export default function Home() {
             <div className="h-72">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={delivery}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
+                  <CartesianGrid
+                    strokeDasharray="3 3"
+                    stroke="#1e293b"
+                  />
 
                   <XAxis
                     dataKey="delivery_status"
@@ -309,66 +529,74 @@ export default function Home() {
               </ResponsiveContainer>
             </div>
           </div>
-          <h2 className="text-xl font-semibold mb-5">
-            Recent Monthly Performance
-          </h2>
 
-          <div className="overflow-x-auto">
-            <table className="w-full text-left">
+          {/* Recent Monthly Performance */}
+          <div className="bg-slate-900 border border-slate-800 rounded-xl p-6">
+            <h2 className="text-xl font-semibold mb-5">
+              Recent Monthly Performance
+            </h2>
 
-              <thead className="text-slate-400 border-b border-slate-700">
-                <tr>
-                  <th className="pb-3">Month</th>
-                  <th className="pb-3">Orders</th>
-                  <th className="pb-3">Revenue</th>
-                  <th className="pb-3">MoM Growth</th>
-                </tr>
-              </thead>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left">
+                <thead className="text-slate-400 border-b border-slate-700">
+                  <tr>
+                    <th className="pb-3">Month</th>
+                    <th className="pb-3">Orders</th>
+                    <th className="pb-3">Revenue</th>
+                    <th className="pb-3">MoM Growth</th>
+                  </tr>
+                </thead>
 
-              <tbody>
-                {revenue
-                  .slice(-8)
-                  .reverse()
-                  .map((row) => (
-                    <tr
-                      key={row.month}
-                      className="border-b border-slate-800"
-                    >
-                      <td className="py-4">
-                        {new Date(row.month).toLocaleDateString("en-US", {
-                          month: "short",
-                          year: "numeric",
-                        })}
-                      </td>
-
-                      <td>
-                        {row.total_orders.toLocaleString()}
-                      </td>
-
-                      <td>
-                        ${Number(row.revenue).toLocaleString()}
-                      </td>
-
-                      <td
-                        className={
-                          Number(row.mom_growth_percent) >= 0
-                            ? "text-green-400"
-                            : "text-red-400"
-                        }
+                <tbody>
+                  {revenue
+                    .slice(-8)
+                    .reverse()
+                    .map((row) => (
+                      <tr
+                        key={row.month}
+                        className="border-b border-slate-800"
                       >
-                        {row.mom_growth_percent === null
-                          ? "—"
-                          : `${row.mom_growth_percent}%`}
-                      </td>
-                    </tr>
-                  ))}
-              </tbody>
+                        <td className="py-4">
+                          {new Date(row.month).toLocaleDateString(
+                            "en-US",
+                            {
+                              month: "short",
+                              year: "numeric",
+                            }
+                          )}
+                        </td>
 
-            </table>
+                        <td>
+                          {row.total_orders.toLocaleString()}
+                        </td>
+
+                        <td>
+                          $
+                          {Number(row.revenue).toLocaleString()}
+                        </td>
+
+                        <td
+                          className={
+                            row.mom_growth_percent === null
+                              ? "text-slate-400"
+                              : row.mom_growth_percent >= 0
+                              ? "text-green-400"
+                              : "text-red-400"
+                          }
+                        >
+                          {row.mom_growth_percent === null
+                            ? "—"
+                            : `${
+                                row.mom_growth_percent >= 0 ? "+" : ""
+                              }${row.mom_growth_percent}%`}
+                        </td>
+                      </tr>
+                    ))}
+                </tbody>
+              </table>
+            </div>
           </div>
-
         </section>
-
       </div>
     </main>
   );
