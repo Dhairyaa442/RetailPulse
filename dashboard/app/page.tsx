@@ -62,8 +62,7 @@ type RootCause = {
 
 type ForecastPoint = {
   month: string;
-  historical: number | null;
-  forecast: number | null;
+  predicted_revenue: number;
 };
 
 type Forecast = {
@@ -204,6 +203,29 @@ export default function Home() {
   const lateDelivery = delivery.find(
     (row) => row.delivery_status === "Late"
   );
+  const recentHistorical = revenue.slice(-6).map((row) => ({
+  month: row.month,
+  historical: Number(row.revenue),
+  forecast: null as number | null,
+}));
+
+  const lastHistorical = revenue.length
+    ? {
+        month: revenue[revenue.length - 1].month,
+        historical: Number(revenue[revenue.length - 1].revenue),
+        forecast: Number(revenue[revenue.length - 1].revenue),
+      }
+    : null;
+
+  const forecastChartData = [
+    ...recentHistorical.slice(0, -1),
+    ...(lastHistorical ? [lastHistorical] : []),
+    ...forecast.map((row) => ({
+      month: row.month,
+      historical: null,
+      forecast: Number(row.predicted_revenue),
+    })),
+  ];
 
   if (loading) {
     return (
@@ -258,39 +280,79 @@ export default function Home() {
 
         {/* Categories + Business Insights */}
         <section className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-10">
+          {/* Top Categories */}
           <div className="bg-slate-900 border border-slate-800 rounded-xl p-6">
-            <h2 className="text-xl font-semibold mb-5">
-              Top Product Categories
-            </h2>
+            <div className="mb-5">
+              <h2 className="text-xl font-semibold">
+                Top Categories by Revenue
+              </h2>
 
-            <div className="space-y-4">
-              {categories.slice(0, 5).map((category) => (
-                <div
-                  key={category.category}
-                  className="flex justify-between border-b border-slate-800 pb-3"
+              <p className="text-sm text-slate-400 mt-1">
+                Highest-revenue product categories
+              </p>
+            </div>
+
+            <div className="h-80">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart
+                  data={categories.slice(0, 5).map((category) => ({
+                    ...category,
+                    displayCategory: category.category.replaceAll("_", " "),
+                  }))}
+                  layout="vertical"
+                  margin={{
+                    top: 5,
+                    right: 20,
+                    left: 20,
+                    bottom: 5,
+                  }}
                 >
-                  <div>
-                    <p className="font-medium capitalize">
-                      {category.category.replaceAll("_", " ")}
-                    </p>
+                  <CartesianGrid
+                    strokeDasharray="3 3"
+                    stroke="#1e293b"
+                    horizontal={false}
+                  />
 
-                    <p className="text-sm text-slate-400">
-                      {category.total_orders.toLocaleString()} orders
-                    </p>
-                  </div>
+                  <XAxis
+                    type="number"
+                    stroke="#94a3b8"
+                    tickFormatter={(value) =>
+                      `$${(Number(value) / 1000000).toFixed(1)}M`
+                    }
+                  />
 
-                  <p className="font-semibold">
-                    $
-                    {Number(category.revenue).toLocaleString(undefined, {
-                      minimumFractionDigits: 2,
-                      maximumFractionDigits: 2,
-                    })}
-                  </p>
-                </div>
-              ))}
+                  <YAxis
+                    type="category"
+                    dataKey="displayCategory"
+                    stroke="#94a3b8"
+                    width={140}
+                    tick={{
+                      fontSize: 12,
+                    }}
+                  />
+
+                  <Tooltip
+                    formatter={(value) => [
+                      `$${Number(value ?? 0).toLocaleString(undefined, {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2,
+                      })}`,
+                      "Revenue",
+                    ]}
+                  />
+
+                  <Bar
+                    dataKey="revenue"
+                    name="Revenue"
+                    fill="#3b82f6"
+                    radius={[0, 6, 6, 0]}
+                  />
+                </BarChart>
+              </ResponsiveContainer>
             </div>
           </div>
 
+          {/* Business Insights */}
           <div className="bg-slate-900 border border-slate-800 rounded-xl p-6">
             <h2 className="text-xl font-semibold mb-5">
               Business Insights
@@ -421,7 +483,7 @@ export default function Home() {
               <>
                 <div className="h-80">
                   <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={forecast}>
+                    <LineChart data={forecastChartData}>
                       <CartesianGrid
                         strokeDasharray="3 3"
                         stroke="#1e293b"
@@ -465,15 +527,25 @@ export default function Home() {
                       />
 
                       <Legend />
-                      <Line
-                        type="monotone"
-                        dataKey="predicted_revenue"
-                        name="Forecast Revenue"
-                        stroke="#a855f7"
-                        strokeWidth={3}
-                        strokeDasharray="6 6"
-                        dot={{ r: 4 }}
-                      />
+                        <Line
+                          type="monotone"
+                          dataKey="historical"
+                          name="Historical Revenue"
+                          stroke="#3b82f6"
+                          strokeWidth={3}
+                          dot={false}
+                          connectNulls={false}
+                        />
+                        <Line
+                          type="monotone"
+                          dataKey="forecast"
+                          name="Forecast Revenue"
+                          stroke="#a855f7"
+                          strokeWidth={3}
+                          strokeDasharray="6 6"
+                          dot={{ r: 4 }}
+                          connectNulls={false}
+                        />
                     </LineChart>
                   </ResponsiveContainer>
                 </div>
