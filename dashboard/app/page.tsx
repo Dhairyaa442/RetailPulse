@@ -62,8 +62,7 @@ type RootCause = {
 
 type ForecastPoint = {
   month: string;
-  historical: number | null;
-  forecast: number | null;
+  predicted_revenue: number;
 };
 
 type Forecast = {
@@ -204,6 +203,45 @@ export default function Home() {
   const lateDelivery = delivery.find(
     (row) => row.delivery_status === "Late"
   );
+  const recentHistorical = revenue.slice(-6).map((row) => ({
+  month: row.month,
+  historical: Number(row.revenue),
+  forecast: null as number | null,
+}));
+
+  const lastHistorical = revenue.length
+    ? {
+        month: revenue[revenue.length - 1].month,
+        historical: Number(revenue[revenue.length - 1].revenue),
+        forecast: Number(revenue[revenue.length - 1].revenue),
+      }
+    : null;
+
+  const forecastChartData = [
+  ...recentHistorical.slice(0, -1),
+  ...(lastHistorical
+    ? [
+        {
+          ...lastHistorical,
+          forecast:
+            forecast.length > 0 &&
+            forecast[0].month === lastHistorical.month
+              ? Number(forecast[0].predicted_revenue)
+              : lastHistorical.forecast,
+        },
+      ]
+    : []),
+
+  ...forecast
+    .filter((row) => row.month !== lastHistorical?.month)
+    .map((row) => ({
+      month: row.month,
+      historical: null,
+      forecast: Number(row.predicted_revenue),
+    })),
+];
+console.log("FORECAST RAW:", forecast);
+console.log("FORECAST CHART:", forecastChartData);
 
   if (loading) {
     return (
@@ -218,16 +256,12 @@ export default function Home() {
       <div className="max-w-7xl mx-auto px-8 py-10">
         {/* Header */}
         <div className="mb-10">
-          <p className="text-blue-400 font-semibold mb-2">
-            RETAIL INTELLIGENCE
-          </p>
-
-          <h1 className="text-4xl font-bold">
+          <h1 className="text-5xl font-bold text-white">
             RetailPulse
           </h1>
 
-          <p className="text-slate-400 mt-2">
-            E-commerce analytics and decision intelligence dashboard
+          <p className="mt-3 text-lg text-slate-400">
+            E-commerce analytics dashboard
           </p>
         </div>
 
@@ -258,42 +292,87 @@ export default function Home() {
 
         {/* Categories + Business Insights */}
         <section className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-10">
+          {/* Top Categories */}
           <div className="bg-slate-900 border border-slate-800 rounded-xl p-6">
-            <h2 className="text-xl font-semibold mb-5">
-              Top Product Categories
-            </h2>
+            <div className="mb-5">
+              <h2 className="text-xl font-semibold">
+                Top Categories by Revenue
+              </h2>
+            </div>
 
-            <div className="space-y-4">
-              {categories.slice(0, 5).map((category) => (
-                <div
-                  key={category.category}
-                  className="flex justify-between border-b border-slate-800 pb-3"
+            <div className="h-80">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart
+                  data={categories.slice(0, 5).map((category) => ({
+                    ...category,
+                    displayCategory: category.category
+                      .replaceAll("_", " ")
+                      .split(" ")
+                      .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+                      .join(" ")
+                      .replace("Health Beauty", "Health & Beauty")
+                      .replace("Watches Gifts", "Watches & Gifts")
+                      .replace("Bed Bath Table", "Bed, Bath & Table")
+                      .replace("Sports Leisure", "Sports & Leisure")
+                      .replace("Computers Accessories", "Computers & Accessories"),
+                  }))}
+                  layout="vertical"
+                  margin={{
+                    top: 5,
+                    right: 20,
+                    left: 20,
+                    bottom: 5,
+                  }}
                 >
-                  <div>
-                    <p className="font-medium capitalize">
-                      {category.category.replaceAll("_", " ")}
-                    </p>
+                  <CartesianGrid
+                    strokeDasharray="3 3"
+                    stroke="#1e293b"
+                    horizontal={false}
+                  />
 
-                    <p className="text-sm text-slate-400">
-                      {category.total_orders.toLocaleString()} orders
-                    </p>
-                  </div>
+                  <XAxis
+                    type="number"
+                    stroke="#94a3b8"
+                    tickFormatter={(value) =>
+                      `$${(Number(value) / 1000000).toFixed(1)}M`
+                    }
+                  />
 
-                  <p className="font-semibold">
-                    $
-                    {Number(category.revenue).toLocaleString(undefined, {
-                      minimumFractionDigits: 2,
-                      maximumFractionDigits: 2,
-                    })}
-                  </p>
-                </div>
-              ))}
+                  <YAxis
+                    type="category"
+                    dataKey="displayCategory"
+                    stroke="#94a3b8"
+                    width={140}
+                    tick={{
+                      fontSize: 12,
+                    }}
+                  />
+
+                  <Tooltip
+                    formatter={(value) => [
+                      `$${Number(value ?? 0).toLocaleString(undefined, {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2,
+                      })}`,
+                      "Revenue",
+                    ]}
+                  />
+
+                  <Bar
+                    dataKey="revenue"
+                    name="Revenue"
+                    fill="#3b82f6"
+                    radius={[0, 6, 6, 0]}
+                  />
+                </BarChart>
+              </ResponsiveContainer>
             </div>
           </div>
 
+          {/* Operational Snapshot */}
           <div className="bg-slate-900 border border-slate-800 rounded-xl p-6">
             <h2 className="text-xl font-semibold mb-5">
-              Business Insights
+              Operational Snapshot
             </h2>
 
             <div className="space-y-5">
@@ -404,7 +483,7 @@ export default function Home() {
                 </h2>
 
                 <p className="text-sm text-slate-400 mt-1">
-                  3-month revenue projection based on Holt trend forecasting
+                  3-month revenue projection
                 </p>
               </div>
 
@@ -421,7 +500,7 @@ export default function Home() {
               <>
                 <div className="h-80">
                   <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={forecast}>
+                    <LineChart data={forecastChartData}>
                       <CartesianGrid
                         strokeDasharray="3 3"
                         stroke="#1e293b"
@@ -430,15 +509,21 @@ export default function Home() {
                       <XAxis
                         dataKey="month"
                         stroke="#94a3b8"
-                        tickFormatter={(value) =>
-                          new Date(String(value)).toLocaleDateString(
-                            "en-US",
-                            {
-                              month: "short",
-                              year: "2-digit",
-                            }
-                          )
-                        }
+                        tickFormatter={(value) => {
+                          const match = String(value).match(/^(\d{4})-(\d{2})/);
+
+                          if (!match) return String(value);
+
+                          const year = match[1].slice(2);
+                          const month = Number(match[2]);
+
+                          const monthNames = [
+                            "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+                            "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
+                          ];
+
+                          return `${monthNames[month - 1]} ${year}`;
+                        }}
                       />
 
                       <YAxis
@@ -465,15 +550,25 @@ export default function Home() {
                       />
 
                       <Legend />
-                      <Line
-                        type="monotone"
-                        dataKey="predicted_revenue"
-                        name="Forecast Revenue"
-                        stroke="#a855f7"
-                        strokeWidth={3}
-                        strokeDasharray="6 6"
-                        dot={{ r: 4 }}
-                      />
+                        <Line
+                          type="monotone"
+                          dataKey="historical"
+                          name="Historical Revenue"
+                          stroke="#3b82f6"
+                          strokeWidth={3}
+                          dot={false}
+                          connectNulls={false}
+                        />
+                        <Line
+                          type="monotone"
+                          dataKey="forecast"
+                          name="Forecast Revenue"
+                          stroke="#a855f7"
+                          strokeWidth={3}
+                          strokeDasharray="6 6"
+                          dot={{ r: 4 }}
+                          connectNulls={false}
+                        />
                     </LineChart>
                   </ResponsiveContainer>
                 </div>
@@ -503,17 +598,16 @@ export default function Home() {
             )}
           </div>
 
-          {/* Business Recommendations */}
+          {/* Key Findings */}
           <div className="bg-slate-900 border border-slate-800 rounded-xl p-6">
             <div className="flex items-center justify-between mb-6">
               <div>
                 <h2 className="text-xl font-semibold">
-                  Business Recommendations
+                  Key Findings
                 </h2>
 
                 <p className="text-sm text-slate-400 mt-1">
-                  Data-driven actions based on customer, delivery, revenue,
-                  and forecast signals
+                  Priority issues identified from current business metrics
                 </p>
               </div>
 
