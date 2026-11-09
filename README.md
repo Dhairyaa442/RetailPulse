@@ -6,7 +6,7 @@ The project combines data engineering, analytical SQL, backend API development, 
 
 ## Dashboard
 
-![RetailPulse Analytics Dashboard](docs/images/retailpulse-dashboard.png)
+![RetailPulse Analytics Dashboard](docs/images/dashboard.png)
 ## Current Capabilities
 
 - Python-based ETL pipeline for ingesting and cleaning e-commerce data
