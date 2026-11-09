@@ -218,14 +218,30 @@ export default function Home() {
     : null;
 
   const forecastChartData = [
-    ...recentHistorical.slice(0, -1),
-    ...(lastHistorical ? [lastHistorical] : []),
-    ...forecast.map((row) => ({
+  ...recentHistorical.slice(0, -1),
+  ...(lastHistorical
+    ? [
+        {
+          ...lastHistorical,
+          forecast:
+            forecast.length > 0 &&
+            forecast[0].month === lastHistorical.month
+              ? Number(forecast[0].predicted_revenue)
+              : lastHistorical.forecast,
+        },
+      ]
+    : []),
+
+  ...forecast
+    .filter((row) => row.month !== lastHistorical?.month)
+    .map((row) => ({
       month: row.month,
       historical: null,
       forecast: Number(row.predicted_revenue),
     })),
-  ];
+];
+console.log("FORECAST RAW:", forecast);
+console.log("FORECAST CHART:", forecastChartData);
 
   if (loading) {
     return (
@@ -240,16 +256,12 @@ export default function Home() {
       <div className="max-w-7xl mx-auto px-8 py-10">
         {/* Header */}
         <div className="mb-10">
-          <p className="text-blue-400 font-semibold mb-2">
-            RETAIL INTELLIGENCE
-          </p>
-
-          <h1 className="text-4xl font-bold">
+          <h1 className="text-5xl font-bold text-white">
             RetailPulse
           </h1>
 
-          <p className="text-slate-400 mt-2">
-            E-commerce analytics and decision intelligence dashboard
+          <p className="mt-3 text-lg text-slate-400">
+            E-commerce analytics dashboard
           </p>
         </div>
 
@@ -286,10 +298,6 @@ export default function Home() {
               <h2 className="text-xl font-semibold">
                 Top Categories by Revenue
               </h2>
-
-              <p className="text-sm text-slate-400 mt-1">
-                Highest-revenue product categories
-              </p>
             </div>
 
             <div className="h-80">
@@ -297,7 +305,16 @@ export default function Home() {
                 <BarChart
                   data={categories.slice(0, 5).map((category) => ({
                     ...category,
-                    displayCategory: category.category.replaceAll("_", " "),
+                    displayCategory: category.category
+                      .replaceAll("_", " ")
+                      .split(" ")
+                      .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+                      .join(" ")
+                      .replace("Health Beauty", "Health & Beauty")
+                      .replace("Watches Gifts", "Watches & Gifts")
+                      .replace("Bed Bath Table", "Bed, Bath & Table")
+                      .replace("Sports Leisure", "Sports & Leisure")
+                      .replace("Computers Accessories", "Computers & Accessories"),
                   }))}
                   layout="vertical"
                   margin={{
@@ -352,10 +369,10 @@ export default function Home() {
             </div>
           </div>
 
-          {/* Business Insights */}
+          {/* Operational Snapshot */}
           <div className="bg-slate-900 border border-slate-800 rounded-xl p-6">
             <h2 className="text-xl font-semibold mb-5">
-              Business Insights
+              Operational Snapshot
             </h2>
 
             <div className="space-y-5">
@@ -466,7 +483,7 @@ export default function Home() {
                 </h2>
 
                 <p className="text-sm text-slate-400 mt-1">
-                  3-month revenue projection based on Holt trend forecasting
+                  3-month revenue projection
                 </p>
               </div>
 
@@ -492,15 +509,21 @@ export default function Home() {
                       <XAxis
                         dataKey="month"
                         stroke="#94a3b8"
-                        tickFormatter={(value) =>
-                          new Date(String(value)).toLocaleDateString(
-                            "en-US",
-                            {
-                              month: "short",
-                              year: "2-digit",
-                            }
-                          )
-                        }
+                        tickFormatter={(value) => {
+                          const match = String(value).match(/^(\d{4})-(\d{2})/);
+
+                          if (!match) return String(value);
+
+                          const year = match[1].slice(2);
+                          const month = Number(match[2]);
+
+                          const monthNames = [
+                            "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+                            "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
+                          ];
+
+                          return `${monthNames[month - 1]} ${year}`;
+                        }}
                       />
 
                       <YAxis
@@ -575,17 +598,16 @@ export default function Home() {
             )}
           </div>
 
-          {/* Business Recommendations */}
+          {/* Key Findings */}
           <div className="bg-slate-900 border border-slate-800 rounded-xl p-6">
             <div className="flex items-center justify-between mb-6">
               <div>
                 <h2 className="text-xl font-semibold">
-                  Business Recommendations
+                  Key Findings
                 </h2>
 
                 <p className="text-sm text-slate-400 mt-1">
-                  Data-driven actions based on customer, delivery, revenue,
-                  and forecast signals
+                  Priority issues identified from current business metrics
                 </p>
               </div>
 
